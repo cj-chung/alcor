@@ -1,20 +1,23 @@
 /*
-Copyright 2019 The Alcor Authors.
+MIT License
+Copyright(c) 2020 Futurewei Cloud
 
-Licensed under the Apache License, Version 2.0 (the "License");
-        you may not use this file except in compliance with the License.
-        You may obtain a copy of the License at
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
 
-        http://www.apache.org/licenses/LICENSE-2.0
-
-        Unless required by applicable law or agreed to in writing, software
-        distributed under the License is distributed on an "AS IS" BASIS,
-        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-        See the License for the specific language governing permissions and
-        limitations under the License.
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 package com.futurewei.alcor.portmanager.processor;
 
+import com.futurewei.alcor.common.enumClass.StatusEnum;
+import com.futurewei.alcor.common.utils.CommonUtil;
+import com.futurewei.alcor.common.utils.SpringContextUtil;
 import com.futurewei.alcor.portmanager.exception.GetNodeInfoException;
 import com.futurewei.alcor.portmanager.exception.NodeInfoNotFound;
 import com.futurewei.alcor.portmanager.exception.PortEntityNotFound;
@@ -22,11 +25,13 @@ import com.futurewei.alcor.portmanager.request.CreateNetworkConfigRequest;
 import com.futurewei.alcor.portmanager.request.DeleteNetworkConfigRequest;
 import com.futurewei.alcor.portmanager.request.IRestRequest;
 import com.futurewei.alcor.portmanager.request.UpdateNetworkConfigRequest;
+import com.futurewei.alcor.portmanager.service.PortService;
+import com.futurewei.alcor.schema.Common;
 import com.futurewei.alcor.web.entity.node.NodeInfo;
 import com.futurewei.alcor.web.entity.dataplane.*;
+import com.futurewei.alcor.web.entity.dataplane.v2.NetworkConfiguration;
 import com.futurewei.alcor.web.entity.port.PortEntity;
 import com.futurewei.alcor.web.entity.route.InternalRouterInfo;
-import com.futurewei.alcor.web.entity.route.Router;
 import com.futurewei.alcor.web.entity.subnet.SubnetEntity;
 import com.futurewei.alcor.web.entity.vpc.VpcEntity;
 import org.slf4j.Logger;
@@ -50,7 +55,7 @@ public class DataPlaneProcessor extends AbstractProcessor {
         return null;
     }
 
-    private List<NeighborEntry> buildNeighborTable(NeighborInfo localInfo, List<NeighborInfo> neighbors, NeighborEntry.NeighborType neighborType) {
+    private List<NeighborEntry> buildNeighborEntries(NeighborInfo localInfo, List<NeighborInfo> neighbors, NeighborEntry.NeighborType neighborType) {
         List<NeighborEntry> neighborTable = new ArrayList<>();
         for (NeighborInfo neighbor : neighbors) {
             NeighborEntry neighborEntry = new NeighborEntry();
@@ -90,14 +95,15 @@ public class DataPlaneProcessor extends AbstractProcessor {
     }
 
     private void buildL3Neighbors(PortContext context, InternalPortEntity internalPortEntity, PortEntity.FixedIp fixedIp, List<String> routerSubnetIds) throws Exception {
-        List<NeighborInfo> neighborInfos = context.getNetworkConfig().getNeighborInfos();
+        Map<String, NeighborInfo> neighborInfos = context.getNetworkConfig().getNeighborInfos();
         if (neighborInfos == null) {
             return;
         }
 
         List<NeighborInfo> l3Neighbors = new ArrayList<>();
         NeighborInfo localNeighborInfo = null;
-        for (NeighborInfo neighborInfo : neighborInfos) {
+        for (Map.Entry<String, NeighborInfo> entry : neighborInfos.entrySet()) {
+            NeighborInfo neighborInfo = entry.getValue();
             if (neighborInfo.getPortIp().equals(fixedIp.getIpAddress())) {
                 localNeighborInfo = neighborInfo;
             } else if (routerSubnetIds.contains(neighborInfo.getSubnetId()) &&
@@ -110,17 +116,19 @@ public class DataPlaneProcessor extends AbstractProcessor {
             localNeighborInfo = getNeighborInfo(context, internalPortEntity, fixedIp);
         }
 
-        List<NeighborEntry> neighborTable = buildNeighborTable(
+        String portIp = localNeighborInfo.getPortIp();
+        List<NeighborEntry> neighborEntries = buildNeighborEntries(
                 localNeighborInfo, l3Neighbors, NeighborEntry.NeighborType.L3);
-        context.getNetworkConfig().addNeighborEntries(neighborTable);
+        context.getNetworkConfig().addNeighborEntries(portIp, neighborEntries);
     }
 
     private void buildL2Neighbors(PortContext context, InternalPortEntity internalPortEntity, PortEntity.FixedIp fixedIp) throws Exception {
-        List<NeighborInfo> neighborInfos = context.getNetworkConfig().getNeighborInfos();
+        Map<String, NeighborInfo> neighborInfos = context.getNetworkConfig().getNeighborInfos();
 
         List<NeighborInfo> l2Neighbors = new ArrayList<>();
         NeighborInfo localNeighborInfo = null;
-        for (NeighborInfo neighborInfo : neighborInfos) {
+        for (Map.Entry<String, NeighborInfo> entry : neighborInfos.entrySet()) {
+            NeighborInfo neighborInfo = entry.getValue();
             if (neighborInfo.getPortIp().equals(fixedIp.getIpAddress())) {
                 localNeighborInfo = neighborInfo;
             } else if (neighborInfo.getSubnetId().equals(fixedIp.getSubnetId())) {
@@ -132,13 +140,14 @@ public class DataPlaneProcessor extends AbstractProcessor {
             localNeighborInfo = getNeighborInfo(context, internalPortEntity, fixedIp);
         }
 
-        List<NeighborEntry> neighborTable = buildNeighborTable(
+        String portIp = localNeighborInfo.getPortIp();
+        List<NeighborEntry> neighborTable = buildNeighborEntries(
                 localNeighborInfo, l2Neighbors, NeighborEntry.NeighborType.L2);
-        context.getNetworkConfig().addNeighborEntries(neighborTable);
+        context.getNetworkConfig().addNeighborEntries(portIp, neighborTable);
     }
 
     private void setNeighborInfos(PortContext context, InternalPortEntity internalPortEntity) throws Exception {
-        List<NeighborInfo> neighborInfos = context.getNetworkConfig().getNeighborInfos();
+        Map<String, NeighborInfo> neighborInfos = context.getNetworkConfig().getNeighborInfos();
         if (internalPortEntity.getFixedIps() == null ||
                 neighborInfos == null ||
                 internalPortEntity.getBindingHostId() == null) {
@@ -146,11 +155,13 @@ public class DataPlaneProcessor extends AbstractProcessor {
         }
 
         for (PortEntity.FixedIp fixedIp : internalPortEntity.getFixedIps()) {
-
             List<SubnetEntity> routerSubnetEntities = context.getRouterSubnetEntities(internalPortEntity.getVpcId());
             if (routerSubnetEntities != null && routerSubnetEntities.size() > 0) {
                 List<String> routerSubnetIds = new ArrayList<>();
-                for (SubnetEntity entity : routerSubnetEntities) routerSubnetIds.add(entity.getId());
+                for (SubnetEntity entity : routerSubnetEntities) {
+                    routerSubnetIds.add(entity.getId());
+                }
+
                 if (routerSubnetIds.contains(fixedIp.getSubnetId())) {
                     buildL3Neighbors(context, internalPortEntity, fixedIp, routerSubnetIds);
                 }
@@ -175,6 +186,10 @@ public class DataPlaneProcessor extends AbstractProcessor {
 
             if (internalPortEntity.getMacAddress() == null) {
                 internalPortEntity.setMacAddress(portEntity.getMacAddress());
+            }
+
+            if (internalPortEntity.getSecurityGroups() == null) {
+                internalPortEntity.setSecurityGroups(portEntity.getSecurityGroups());
             }
 
             setNeighborInfos(context, internalPortEntity);
@@ -215,6 +230,38 @@ public class DataPlaneProcessor extends AbstractProcessor {
 
     }
 
+    private List<ResourceOperation> initializeResourceOperationTypes(PortContext context, List<PortEntity> portEntities) {
+        List<ResourceOperation> resourceOperationTypes = new ArrayList<>();
+        resourceOperationTypes.add(new ResourceOperation(Common.ResourceType.PORT, Common.OperationType.CREATE));
+        resourceOperationTypes.add(new ResourceOperation(Common.ResourceType.NEIGHBOR, Common.OperationType.CREATE));
+
+        // TODO: to enable full sg support, we will need to add full security group entities to context and check context here
+        for (PortEntity port : portEntities) {
+            if (!CommonUtil.isNullOrEmpty(context.getDefaultSgId()) && port.getPortSecurityEnabled()) {
+                resourceOperationTypes.add(new ResourceOperation(Common.ResourceType.SECURITYGROUP, Common.OperationType.CREATE));
+                break;
+            }
+        }
+
+        if (context.containRouters()) {
+            resourceOperationTypes.add(new ResourceOperation(Common.ResourceType.ROUTER, Common.OperationType.CREATE));
+        }
+
+        return resourceOperationTypes;
+    }
+
+    private void markOperationTypes(NetworkConfiguration networkConfig, Common.OperationType operationType) {
+        if (networkConfig == null || networkConfig.getRsOpTypes() == null) {
+            return;
+        }
+
+        List<ResourceOperation> resourceOperationTypes = networkConfig.getRsOpTypes();
+        for (ResourceOperation type : resourceOperationTypes) {
+            type.setOpType(operationType);
+        }
+    }
+
+
     private NetworkConfiguration buildNetworkConfig(PortContext context, List<PortEntity> portEntities) throws Exception {
         /**
          DataPlaneProcessor needs to wait for all previous Processor runs to
@@ -231,8 +278,11 @@ public class DataPlaneProcessor extends AbstractProcessor {
         }
 
         setTheMissingFields(context, portEntities);
+        List<ResourceOperation> resourceOperationTypes = initializeResourceOperationTypes(context, portEntities);
 
         NetworkConfiguration networkConfiguration = new NetworkConfiguration();
+        networkConfiguration.setRsType(Common.ResourceType.PORT);
+        networkConfiguration.setRsOpTypes(resourceOperationTypes);
         networkConfiguration.setVpcs(networkConfig.getVpcEntities());
         networkConfiguration.setSubnets(networkConfig.getSubnetEntities());
         networkConfiguration.setSecurityGroups(networkConfig.getSecurityGroups());
@@ -246,24 +296,32 @@ public class DataPlaneProcessor extends AbstractProcessor {
         return networkConfiguration;
     }
 
-    private void createNetworkConfig(PortContext context, NetworkConfiguration networkConfig) {
+    private void createNetworkConfig(PortContext context, NetworkConfiguration networkConfig) throws Exception {
+        PortService portService = SpringContextUtil.getBean(PortService.class);
         if (networkConfig != null) {
+            networkConfig.setOpType(Common.OperationType.CREATE);
             IRestRequest createNetworkConfigRequest =
                     new CreateNetworkConfigRequest(context, networkConfig);
-            context.getRequestManager().sendRequestAsync(createNetworkConfigRequest, null);
+            context.getRequestManager().sendRequestAsync(createNetworkConfigRequest, request -> portService.updatePortStatus(request, networkConfig, null));
+            portService.updatePortStatus(createNetworkConfigRequest, networkConfig, StatusEnum.CREATED.getStatus());
         }
     }
 
-    private void updateNetworkConfig(PortContext context, NetworkConfiguration networkConfig) {
+    private void updateNetworkConfig(PortContext context, NetworkConfiguration networkConfig) throws Exception {
+        PortService portService = SpringContextUtil.getBean(PortService.class);
         if (networkConfig != null) {
+            networkConfig.setOpType(Common.OperationType.UPDATE);
             IRestRequest updateNetworkConfigRequest =
                     new UpdateNetworkConfigRequest(context, networkConfig);
-            context.getRequestManager().sendRequestAsync(updateNetworkConfigRequest, null);
+            context.getRequestManager().sendRequestAsync(updateNetworkConfigRequest, request -> portService.updatePortStatus(request, networkConfig, null));
+            portService.updatePortStatus(updateNetworkConfigRequest, networkConfig, StatusEnum.PENDING.getStatus());
         }
     }
 
     private void deleteNetworkConfig(PortContext context, NetworkConfiguration networkConfig) {
         if (networkConfig != null) {
+            networkConfig.setOpType(Common.OperationType.DELETE);
+            markOperationTypes(networkConfig, Common.OperationType.DELETE);
             IRestRequest deleteNetworkConfigRequest =
                     new DeleteNetworkConfigRequest(context, networkConfig);
             context.getRequestManager().sendRequestAsync(deleteNetworkConfigRequest, null);
@@ -278,7 +336,7 @@ public class DataPlaneProcessor extends AbstractProcessor {
     @Override
     void updateProcess(PortContext context) throws Exception {
         updateNetworkConfig(context, buildNetworkConfig(context,
-                Collections.singletonList(context.getOldPortEntity())));
+                Collections.singletonList(context.getNewPortEntity())));
     }
 
     @Override

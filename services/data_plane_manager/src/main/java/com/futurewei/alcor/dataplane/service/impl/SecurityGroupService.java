@@ -1,29 +1,31 @@
 /*
-Copyright 2019 The Alcor Authors.
+MIT License
+Copyright(c) 2020 Futurewei Cloud
 
-Licensed under the Apache License, Version 2.0 (the "License");
-        you may not use this file except in compliance with the License.
-        You may obtain a copy of the License at
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
 
-        http://www.apache.org/licenses/LICENSE-2.0
-
-        Unless required by applicable law or agreed to in writing, software
-        distributed under the License is distributed on an "AS IS" BASIS,
-        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-        See the License for the specific language governing permissions and
-        limitations under the License.
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 package com.futurewei.alcor.dataplane.service.impl;
 
 import com.futurewei.alcor.dataplane.entity.UnicastGoalState;
-import com.futurewei.alcor.dataplane.exception.SecurityGroupNotFound;
-import com.futurewei.alcor.dataplane.exception.SecurityGroupRuleNotFound;
-import com.futurewei.alcor.schema.Common;
+import com.futurewei.alcor.dataplane.exception.*;
+import com.futurewei.alcor.schema.Common.EtherType;
+import com.futurewei.alcor.schema.Common.Protocol;
 import com.futurewei.alcor.schema.Port;
+import com.futurewei.alcor.schema.SecurityGroup.SecurityGroupConfiguration.Direction;
 import com.futurewei.alcor.web.entity.dataplane.v2.NetworkConfiguration;
 import com.futurewei.alcor.web.entity.securitygroup.SecurityGroup;
 import com.futurewei.alcor.web.entity.securitygroup.SecurityGroupRule;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.HashSet;
 import java.util.List;
@@ -48,6 +50,54 @@ public class SecurityGroupService extends ResourceService {
         return result;
     }
 
+    private Direction transformDirection(String direction) throws Exception {
+        if (StringUtils.isEmpty(direction)) {
+            throw new SecurityGroupDirectionInvalid();
+        }
+
+        switch (direction) {
+            case "ingress":
+                return Direction.INGRESS;
+            case "egress":
+                return Direction.EGRESS;
+        }
+
+        throw new SecurityGroupDirectionInvalid();
+    }
+
+    private EtherType transformEtherType(String etherType) throws Exception {
+        if (StringUtils.isEmpty(etherType)) {
+            return EtherType.IPV4;
+        }
+
+        switch (etherType) {
+            case "IPv4":
+                return EtherType.IPV4;
+            case "IPv6":
+                return EtherType.IPV6;
+        }
+
+        throw new SecurityGroupEtherTypeInvalid();
+    }
+
+    private Protocol transformProtocol(String protocol) throws Exception {
+        if (StringUtils.isEmpty(protocol)) {
+            throw new SecurityGroupProtocolInvalid();
+        }
+
+        switch (protocol) {
+            case "tcp":
+                return Protocol.TCP;
+            case "udp":
+                return Protocol.UDP;
+            case "icmp":
+                return Protocol.ICMP;
+            case "http":
+                return Protocol.HTTP;
+        }
+
+        throw new SecurityGroupProtocolInvalid();
+    }
 
     public void buildSecurityGroupStates(NetworkConfiguration networkConfig, UnicastGoalState unicastGoalState) throws Exception {
         List<Port.PortState> portStates = unicastGoalState.getGoalStateBuilder().getPortStatesList();
@@ -82,13 +132,29 @@ public class SecurityGroupService extends ResourceService {
                         com.futurewei.alcor.schema.SecurityGroup.SecurityGroupConfiguration.SecurityGroupRule.newBuilder();
                 securityGroupRuleBuilder.setSecurityGroupId(securityGroup.getId());
                 securityGroupRuleBuilder.setId(securityGroupRule.getId());
-                securityGroupRuleBuilder.setDirection(com.futurewei.alcor.schema.SecurityGroup.SecurityGroupConfiguration.Direction.valueOf(securityGroupRule.getDirection()));
-                securityGroupRuleBuilder.setEthertype(Common.EtherType.valueOf(securityGroupRule.getEtherType()));
-                securityGroupRuleBuilder.setProtocol(Common.Protocol.valueOf(securityGroupRule.getProtocol()));
-                securityGroupRuleBuilder.setPortRangeMin(securityGroupRule.getPortRangeMin());
-                securityGroupRuleBuilder.setPortRangeMax(securityGroupRule.getPortRangeMax());
-                securityGroupRuleBuilder.setRemoteIpPrefix(securityGroupRule.getRemoteIpPrefix());
-                securityGroupRuleBuilder.setRemoteGroupId(securityGroupRule.getRemoteGroupId());
+                securityGroupRuleBuilder.setDirection(transformDirection(securityGroupRule.getDirection()));
+                securityGroupRuleBuilder.setEthertype(transformEtherType(securityGroupRule.getEtherType()));
+
+                if (securityGroupRule.getProtocol() != null) {
+                    securityGroupRuleBuilder.setProtocol(transformProtocol(securityGroupRule.getProtocol()));
+                }
+
+                if (securityGroupRule.getPortRangeMin() != null) {
+                    securityGroupRuleBuilder.setPortRangeMin(securityGroupRule.getPortRangeMin());
+                }
+
+                if (securityGroupRule.getPortRangeMax() != null) {
+                    securityGroupRuleBuilder.setPortRangeMax(securityGroupRule.getPortRangeMax());
+                }
+
+                if (securityGroupRule.getRemoteIpPrefix() != null) {
+                    securityGroupRuleBuilder.setRemoteIpPrefix(securityGroupRule.getRemoteIpPrefix());
+                }
+
+                if (securityGroupRule.getRemoteGroupId() != null) {
+                    securityGroupRuleBuilder.setRemoteGroupId(securityGroupRule.getRemoteGroupId());
+                }
+
                 securityGroupConfigBuilder.addSecurityGroupRules(securityGroupRuleBuilder.build());
             }
 

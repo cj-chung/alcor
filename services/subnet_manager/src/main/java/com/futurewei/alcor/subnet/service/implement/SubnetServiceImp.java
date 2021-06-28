@@ -1,3 +1,19 @@
+/*
+MIT License
+Copyright(c) 2020 Futurewei Cloud
+
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
+
 package com.futurewei.alcor.subnet.service.implement;
 
 
@@ -16,14 +32,14 @@ import com.futurewei.alcor.subnet.exception.*;
 import com.futurewei.alcor.subnet.service.SubnetDatabaseService;
 import com.futurewei.alcor.subnet.service.SubnetService;
 import com.futurewei.alcor.subnet.utils.SubnetManagementUtil;
+import com.futurewei.alcor.web.entity.ip.IpAddrRangeRequest;
+import com.futurewei.alcor.web.entity.ip.IpAddrRequest;
+import com.futurewei.alcor.web.entity.mac.MacState;
+import com.futurewei.alcor.web.entity.mac.MacStateJson;
 import com.futurewei.alcor.web.entity.port.PortEntity;
-import com.futurewei.alcor.web.entity.port.PortWebBulkJson;
 import com.futurewei.alcor.web.entity.route.*;
-import com.futurewei.alcor.web.entity.subnet.SubnetEntity;
-import com.futurewei.alcor.web.entity.vpc.*;
-import com.futurewei.alcor.web.entity.ip.*;
 import com.futurewei.alcor.web.entity.subnet.*;
-import com.futurewei.alcor.web.entity.mac.*;
+import com.futurewei.alcor.web.entity.vpc.VpcWebJson;
 import org.apache.commons.net.util.SubnetUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +51,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -59,6 +74,9 @@ public class SubnetServiceImp implements SubnetService {
 
     @Value("${microservices.ip.service.url}")
     private String ipUrl;
+
+    @Value("${microservices.port.service.url}")
+    private String portUrl;
 
     private RestTemplate restTemplate = new RestTemplate();
 
@@ -365,27 +383,21 @@ public class SubnetServiceImp implements SubnetService {
     }
 
     @Override
-    public boolean checkIfAnyPortInSubnet(String rangeId) throws RangeIdIsNullOrEmpty {
-        if (rangeId == null) {
-            throw new RangeIdIsNullOrEmpty();
+    public boolean checkIfAnyPortInSubnet(String projectId, String subnetId) throws SubnetIdIsNull {
+        if (subnetId == null) {
+            throw new SubnetIdIsNull();
         }
-        String ipManagerServiceUrl = ipUrl + "range/" + rangeId;
-        IpAddrRangeRequest ipAddrRangeRequest = restTemplate.getForObject(ipManagerServiceUrl, IpAddrRangeRequest.class);
-        if (ipAddrRangeRequest == null) {
+        String portManagerServiceUrl = portUrl + "project/" + projectId + "/subnet-port-count/" + subnetId;
+        int  portCount = restTemplate.getForObject(portManagerServiceUrl, Integer.class);
+        if (portCount == 0) {
             return false;
         }
 
-        // check usedIps
-        long usedIps = ipAddrRangeRequest.getUsedIps();
-        if (usedIps > ConstantsConfig.UsedIpThreshold) {
-            return true;
-        }
-
-        return false;
+        return true;
     }
 
     @Override
-    public boolean checkIfSubnetBindAnyRoutes(SubnetEntity subnetEntity) {
+    public boolean checkIfSubnetBindAnyRouter(SubnetEntity subnetEntity) {
 
         String attachedRouterId = subnetEntity.getAttachedRouterId();
         if (attachedRouterId == null || attachedRouterId.equals("")){
@@ -539,6 +551,7 @@ public class SubnetServiceImp implements SubnetService {
         if (subnetEntity == null) {
             return;
         }
+
         List<HostRoute> hostRoutes = subnetEntity.getHostRoutes();
         List<RouteEntry> routeEntities = new ArrayList<>();
         for (HostRoute hostRoute : hostRoutes) {
@@ -554,11 +567,9 @@ public class SubnetServiceImp implements SubnetService {
         routetable.setRouteTableType(RouteTableType.NEUTRON_SUBNET.getRouteTableType());
         routetable.setRouteEntities(routeEntities);
 
-
         String routeManagerServiceUrl = routeUrl + "project/" + projectId + "/subnets/" + subnetId + "/routetable";
         HttpEntity<RouteTableWebJson> routeRequest = new HttpEntity<>(new RouteTableWebJson(routetable));
         restTemplate.put(routeManagerServiceUrl, routeRequest, RouteTableWebJson.class);
-
     }
 
     @Override
@@ -613,4 +624,15 @@ public class SubnetServiceImp implements SubnetService {
 
         return portEntity;
     }
+
+    @Override
+    public void deleteIPRangeInPIM(String rangeId) {
+        if (rangeId == null) {
+            return;
+        }
+
+        String ipManagerCreateRangeUrl = ipUrl + "range/"+ rangeId;
+        restTemplate.delete(ipManagerCreateRangeUrl);
+    }
+
 }

@@ -1,17 +1,17 @@
 /*
-Copyright 2019 The Alcor Authors.
+MIT License
+Copyright(c) 2020 Futurewei Cloud
 
-Licensed under the Apache License, Version 2.0 (the "License");
-        you may not use this file except in compliance with the License.
-        You may obtain a copy of the License at
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
 
-        http://www.apache.org/licenses/LICENSE-2.0
-
-        Unless required by applicable law or agreed to in writing, software
-        distributed under the License is distributed on an "AS IS" BASIS,
-        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-        See the License for the specific language governing permissions and
-        limitations under the License.
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 package com.futurewei.alcor.route.controller;
 
@@ -19,7 +19,8 @@ import com.futurewei.alcor.common.entity.ResponseId;
 import com.futurewei.alcor.common.exception.DatabasePersistenceException;
 import com.futurewei.alcor.common.exception.ParameterNullOrEmptyException;
 import com.futurewei.alcor.common.exception.ResourceNotValidException;
-import com.futurewei.alcor.common.logging.*;
+import com.futurewei.alcor.common.logging.Logger;
+import com.futurewei.alcor.common.logging.LoggerFactory;
 import com.futurewei.alcor.common.stats.DurationStatistics;
 import com.futurewei.alcor.route.exception.CanNotFindVpc;
 import com.futurewei.alcor.route.exception.HostRoutesToSubnetIsNull;
@@ -39,6 +40,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.logging.Level;
 
 import static org.springframework.web.bind.annotation.RequestMethod.*;
@@ -227,10 +229,10 @@ public class RouterController {
                 internalSubnetRoutingTableList.add(internalSubnetRoutingTable);
             }
 
-            InternalRouterInfo internalRouterInfo = this.neutronRouterService.constructInternalRouterInfo(internalSubnetRoutingTableList);
+            InternalRouterInfo internalRouterInfo = this.neutronRouterService.constructInternalRouterInfo(router.getId(), internalSubnetRoutingTableList);
 
             // send InternalRouterInfo contract to DPM
-            this.routerToDPMService.sendInternalRouterInfoToDPM(internalRouterInfo);
+//            this.routerToDPMService.sendInternalRouterInfoToDPM(internalRouterInfo);
 
         } catch (ParameterNullOrEmptyException e) {
             throw e;
@@ -350,7 +352,7 @@ public class RouterController {
     @DurationStatistics
     public RouteTableWebJson createNeutronSubnetRouteTable(@PathVariable String projectid, @PathVariable String subnetid, @RequestBody RouteTableWebJson resource) throws Exception {
 
-        RouteTable routeTable = null;
+        RouteTable routeTable = resource.getRoutetable();
 
         try {
             RestPreconditionsUtil.verifyParameterNotNullorEmpty(subnetid);
@@ -362,43 +364,27 @@ public class RouterController {
                 throw new ResourceNotValidException("request resource is invalid");
             }
 
-            routeTable = this.routerService.createNeutronSubnetRouteTable(projectid, subnetid, resource);
-
-            // sub-level routing rule update
+            // add host route
             List<RouteEntry> routeEntities = routeTable.getRouteEntities();
-            NewRoutesWebRequest newRoutes = new NewRoutesWebRequest();
-            List<NewRoutesRequest> routes = new ArrayList<>();
+            List<RouteEntry> routes = new ArrayList<>();
             for (RouteEntry routeEntry : routeEntities) {
-                String destination = routeEntry.getDestination();
-                String nexthop = routeEntry.getNexthop();
-                NewRoutesRequest newRoutesRequest = new NewRoutesRequest(destination, nexthop);
-                routes.add(newRoutesRequest);
+                String uuid = UUID.randomUUID().toString();
+                RouteEntry newRoute = new RouteEntry(projectid, uuid, "route-" + uuid, routeEntry.getDescription(),
+                        routeEntry.getDestination(), null, 100, null, routeEntry.getNexthop());
+                routes.add(newRoute);
             }
-            newRoutes.setRoutes(routes);
+            String d_uuid = UUID.randomUUID().toString();
+            RouteEntry defaultRoute = new RouteEntry(projectid, d_uuid, "default-route-" + d_uuid, "Default Routing Rule",
+                    "0.0.0.0/0", null, 100, null, "192.168.0.1");
+            routes.add(defaultRoute);
 
-            UpdateRoutingRuleResponse updateRoutingRuleResponse = this.neutronRouterService.updateRoutingRule(subnetid, newRoutes, false);
-            InternalSubnetRoutingTable internalSubnetRoutingTable = updateRoutingRuleResponse.getInternalSubnetRoutingTable();
-            List<InternalSubnetRoutingTable> internalSubnetRoutingTables = new ArrayList<>();
-            internalSubnetRoutingTables.add(internalSubnetRoutingTable);
-            InternalRouterInfo internalRouterInfo = this.neutronRouterService.constructInternalRouterInfo(internalSubnetRoutingTables);
-            List<HostRoute> hostRouteToSubnet = updateRoutingRuleResponse.getHostRouteToSubnet();
-
-            // TODO: send InternalRouterInfo contract to DPM
-//            this.routerToDPMService.sendInternalRouterInfoToDPM(internalRouterInfo);
-
-            // update routes in subnet manager
-//            if (hostRouteToSubnet == null) {
-//                throw new HostRoutesToSubnetIsNull();
-//            }
-//            this.vpcRouterToSubnetService.updateRoutingRuleInSubnetManager(projectid, subnetid, hostRouteToSubnet);
+            routeTable = this.routerService.createNeutronSubnetRouteTable(projectid, subnetid, resource, routes);
 
         } catch (ParameterNullOrEmptyException e) {
             throw e;
         } catch (DatabasePersistenceException e) {
             throw e;
-        } //catch (HostRoutesToSubnetIsNull e) {
-//            throw e;
-//        }
+        }
 
         return new RouteTableWebJson(routeTable);
     }
@@ -429,17 +415,18 @@ public class RouterController {
                 throw new ResourceNotValidException("request resource is invalid");
             }
 
-            routetable = this.routerService.updateSubnetRouteTable(projectid, subnetid, resource);
-
+            routetable = resource.getRoutetable();
             // sub-level routing rule update
             List<RouteEntry> routeEntities = routetable.getRouteEntities();
             NewRoutesWebRequest newRoutes = new NewRoutesWebRequest();
             List<NewRoutesRequest> routes = new ArrayList<>();
-            for (RouteEntry routeEntry : routeEntities) {
-                String destination = routeEntry.getDestination();
-                String target = routeEntry.getTarget();
-                NewRoutesRequest newRoutesRequest = new NewRoutesRequest(destination, target);
-                routes.add(newRoutesRequest);
+            if (routeEntities != null) {
+                for (RouteEntry routeEntry : routeEntities) {
+                    String destination = routeEntry.getDestination();
+                    String nexthop = routeEntry.getNexthop();
+                    NewRoutesRequest newRoutesRequest = new NewRoutesRequest(destination, nexthop);
+                    routes.add(newRoutesRequest);
+                }
             }
             newRoutes.setRoutes(routes);
 
@@ -447,18 +434,19 @@ public class RouterController {
             InternalSubnetRoutingTable internalSubnetRoutingTable = updateRoutingRuleResponse.getInternalSubnetRoutingTable();
             List<InternalSubnetRoutingTable> internalSubnetRoutingTables = new ArrayList<>();
             internalSubnetRoutingTables.add(internalSubnetRoutingTable);
-            InternalRouterInfo internalRouterInfo = this.neutronRouterService.constructInternalRouterInfo(internalSubnetRoutingTables);
+            InternalRouterInfo internalRouterInfo = this.neutronRouterService.constructInternalRouterInfo(null, internalSubnetRoutingTables);
             List<HostRoute> hostRouteToSubnet = updateRoutingRuleResponse.getHostRouteToSubnet();
 
+            this.routerService.updateSubnetRouteTable(projectid, subnetid, updateRoutingRuleResponse);
+
             // send InternalRouterInfo contract to DPM
-            this.routerToDPMService.sendInternalRouterInfoToDPM(internalRouterInfo);
+            //this.routerToDPMService.sendInternalRouterInfoToDPM(internalRouterInfo);
 
             // update routes in subnet manager
             if (hostRouteToSubnet == null) {
                 throw new HostRoutesToSubnetIsNull();
             }
             this.vpcRouterToSubnetService.updateRoutingRuleInSubnetManager(projectid, subnetid, hostRouteToSubnet);
-
         } catch (ParameterNullOrEmptyException | HostRoutesToSubnetIsNull e) {
             throw e;
         } catch (OwnMultipleSubnetRouteTablesException e) {
@@ -491,8 +479,6 @@ public class RouterController {
             RestPreconditionsUtil.verifyParameterNotNullorEmpty(projectid);
             RestPreconditionsUtil.verifyResourceFound(projectid);
 
-            routerId = this.routerService.deleteSubnetRouteTable(projectid, subnetid);
-
             // sub-level routing rule update
             NewRoutesWebRequest newRoutes = new NewRoutesWebRequest();
             List<NewRoutesRequest> routes = new ArrayList<>();
@@ -501,17 +487,19 @@ public class RouterController {
             InternalSubnetRoutingTable internalSubnetRoutingTable = updateRoutingRuleResponse.getInternalSubnetRoutingTable();
             List<InternalSubnetRoutingTable> internalSubnetRoutingTables = new ArrayList<>();
             internalSubnetRoutingTables.add(internalSubnetRoutingTable);
-            InternalRouterInfo internalRouterInfo = this.neutronRouterService.constructInternalRouterInfo(internalSubnetRoutingTables);
+            InternalRouterInfo internalRouterInfo = this.neutronRouterService.constructInternalRouterInfo(null, internalSubnetRoutingTables);
             List<HostRoute> hostRouteToSubnet = updateRoutingRuleResponse.getHostRouteToSubnet();
 
             // send InternalRouterInfo contract to DPM
-            this.routerToDPMService.sendInternalRouterInfoToDPM(internalRouterInfo);
+//            this.routerToDPMService.sendInternalRouterInfoToDPM(internalRouterInfo);
 
             // update routes in subnet manager
             if (hostRouteToSubnet == null) {
                 throw new HostRoutesToSubnetIsNull();
             }
             this.vpcRouterToSubnetService.updateRoutingRuleInSubnetManager(projectid, subnetid, hostRouteToSubnet);
+
+            routerId = this.routerService.deleteSubnetRouteTable(projectid, subnetid);
 
         } catch (ParameterNullOrEmptyException | HostRoutesToSubnetIsNull e) {
             throw e;

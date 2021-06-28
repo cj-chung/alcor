@@ -1,25 +1,25 @@
 /*
-Copyright 2019 The Alcor Authors.
+MIT License
+Copyright(c) 2020 Futurewei Cloud
 
-Licensed under the Apache License, Version 2.0 (the "License");
-        you may not use this file except in compliance with the License.
-        You may obtain a copy of the License at
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
 
-        http://www.apache.org/licenses/LICENSE-2.0
-
-        Unless required by applicable law or agreed to in writing, software
-        distributed under the License is distributed on an "AS IS" BASIS,
-        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-        See the License for the specific language governing permissions and
-        limitations under the License.
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 package com.futurewei.alcor.dataplane.service.impl;
 
 import com.futurewei.alcor.dataplane.entity.UnicastGoalState;
 import com.futurewei.alcor.dataplane.exception.VpcEntityNotFound;
+import com.futurewei.alcor.schema.Common;
 import com.futurewei.alcor.schema.Port;
 import com.futurewei.alcor.schema.Vpc;
-import com.futurewei.alcor.web.entity.dataplane.InternalSubnetEntity;
 import com.futurewei.alcor.web.entity.dataplane.v2.NetworkConfiguration;
 import com.futurewei.alcor.web.entity.vpc.VpcEntity;
 import org.springframework.stereotype.Service;
@@ -64,22 +64,10 @@ public class VpcService extends ResourceService {
                 vpcConfigBuilder.setCidr(vpcEntity.getCidr());
             }
 
-            //vpcConfigBuilder.setTunnelId();
-
-            if (networkConfig.getSubnets() != null) {
-                networkConfig.getSubnets().stream()
-                        .filter(s -> s.getVpcId().equals(vpcEntity.getId()))
-                        .map(InternalSubnetEntity::getId)
-                        .forEach(id -> {
-                            Vpc.VpcConfiguration.SubnetId.Builder subnetIdBuilder = Vpc.VpcConfiguration.SubnetId.newBuilder();
-                            subnetIdBuilder.setId(id);
-                            vpcConfigBuilder.addSubnetIds(subnetIdBuilder.build());
-                        });
-            }
             //set routes here
 
             Vpc.VpcState.Builder vpcStateBuilder = Vpc.VpcState.newBuilder();
-            vpcStateBuilder.setOperationType(networkConfig.getOpType());
+            vpcStateBuilder.setOperationType(Common.OperationType.INFO);
             vpcStateBuilder.setConfiguration(vpcConfigBuilder.build());
 
             unicastGoalState.getGoalStateBuilder().addVpcStates(vpcStateBuilder.build());

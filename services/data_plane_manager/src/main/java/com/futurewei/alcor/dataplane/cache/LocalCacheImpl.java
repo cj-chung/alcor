@@ -1,29 +1,31 @@
 /*
-Copyright 2019 The Alcor Authors.
+MIT License
+Copyright(c) 2020 Futurewei Cloud
 
-Licensed under the Apache License, Version 2.0 (the "License");
-        you may not use this file except in compliance with the License.
-        You may obtain a copy of the License at
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
 
-        http://www.apache.org/licenses/LICENSE-2.0
-
-        Unless required by applicable law or agreed to in writing, software
-        distributed under the License is distributed on an "AS IS" BASIS,
-        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-        See the License for the specific language governing permissions and
-        limitations under the License.
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 package com.futurewei.alcor.dataplane.cache;
 
-import com.futurewei.alcor.dataplane.client.grpc.DataPlaneClientImpl;
 import com.futurewei.alcor.dataplane.exception.SubnetEntityNotFound;
+import com.futurewei.alcor.schema.Common.OperationType;
 import com.futurewei.alcor.web.entity.dataplane.InternalPortEntity;
 import com.futurewei.alcor.web.entity.dataplane.InternalSubnetEntity;
 import com.futurewei.alcor.web.entity.dataplane.v2.NetworkConfiguration;
+import com.futurewei.alcor.web.entity.node.NodeInfo;
 import com.futurewei.alcor.web.entity.port.PortEntity;
 import com.futurewei.alcor.web.entity.port.PortHostInfo;
+import com.futurewei.alcor.web.entity.route.InternalRouterInfo;
+import com.futurewei.alcor.web.entity.route.InternalSubnetRoutingTable;
 import com.futurewei.alcor.web.entity.subnet.InternalSubnetPorts;
-import com.futurewei.alcor.web.entity.subnet.SubnetEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,8 +43,11 @@ public class LocalCacheImpl implements LocalCache {
     @Autowired
     private SubnetPortsCache subnetPortsCache;
 
+    @Autowired
+    private NodeInfoCache nodeInfoCache;
+
     @Override
-    public void addSubnetPorts(NetworkConfiguration networkConfig) throws Exception {
+    public void setSubnetPorts(NetworkConfiguration networkConfig) throws Exception {
         List<InternalPortEntity> portEntities = networkConfig.getPortEntities();
         if (portEntities == null) {
             return;
@@ -68,13 +73,36 @@ public class LocalCacheImpl implements LocalCache {
 
                 InternalSubnetPorts subnetPorts = subnetPortsMap.get(subnetId);
                 if (subnetPorts == null) {
-                    SubnetEntity subnetEntity = getSubnetEntity(networkConfig, fixedIp.getSubnetId());
+                    InternalSubnetEntity subnetEntity = getSubnetEntity(networkConfig, fixedIp.getSubnetId());
+
                     subnetPorts = new InternalSubnetPorts();
                     subnetPorts.setSubnetId(subnetId);
                     subnetPorts.setGatewayPortMac(subnetEntity.getGatewayPortDetail().getGatewayMacAddress());
                     subnetPorts.setGatewayPortIp(subnetEntity.getGatewayIp());
                     subnetPorts.setGatewayPortId(subnetEntity.getGatewayPortDetail().getGatewayPortId());
+                    subnetPorts.setName(subnetEntity.getName());
+                    subnetPorts.setCidr(subnetEntity.getCidr());
+                    subnetPorts.setVpcId(subnetEntity.getVpcId());
+                    subnetPorts.setTunnelId(subnetEntity.getTunnelId());
+                    subnetPorts.setDhcpEnable(subnetEntity.getDhcpEnable());
                     subnetPorts.setPorts(new ArrayList<>());
+
+                    List<InternalRouterInfo> routers = networkConfig.getInternalRouterInfos();
+                    if (routers != null && routers.size() > 0) {
+                        String router_id = "";
+                        for (InternalRouterInfo router : routers) {
+                            List<InternalSubnetRoutingTable> subnetRoutingTables = router.getRouterConfiguration().getSubnetRoutingTables();
+                            if (subnetRoutingTables == null) continue;
+                            for (InternalSubnetRoutingTable subnetRoutingTable: subnetRoutingTables) {
+                                if (subnetRoutingTable.getSubnetId().equals(subnetId)) {
+                                    router_id = router.getRouterConfiguration().getId();
+                                    subnetPorts.setRouterId(router_id);
+                                    break;
+                                }
+                            }
+                            if (!router_id.equals("")) break;
+                        }
+                    }
 
                     subnetPortsMap.put(subnetId, subnetPorts);
                 }
@@ -88,13 +116,13 @@ public class LocalCacheImpl implements LocalCache {
         }
     }
 
-    private SubnetEntity getSubnetEntity(NetworkConfiguration networkConfig, String subnetId) throws Exception {
+    private InternalSubnetEntity getSubnetEntity(NetworkConfiguration networkConfig, String subnetId) throws Exception {
         List<InternalSubnetEntity> subnetEntities = networkConfig.getSubnets();
         if (subnetEntities == null) {
             throw new SubnetEntityNotFound();
         }
 
-        for (SubnetEntity subnetEntity: subnetEntities) {
+        for (InternalSubnetEntity subnetEntity: subnetEntities) {
             if (subnetId.equals(subnetEntity.getId())) {
                 return subnetEntity;
             }
@@ -116,5 +144,51 @@ public class LocalCacheImpl implements LocalCache {
     @Override
     public InternalSubnetPorts getSubnetPorts(String subnetId) throws Exception {
         return subnetPortsCache.getSubnetPorts(subnetId);
+    }
+
+    @Override
+    public void updateLocalCache(NetworkConfiguration networkConfig) throws Exception {
+        OperationType opType = networkConfig.getOpType();
+        switch (opType) {
+            case CREATE:
+            case UPDATE:
+                setSubnetPorts(networkConfig);
+                break;
+            case DELETE:
+                deleteSubnetPorts(networkConfig);
+                break;
+            default:
+                LOG.error("Update SubnetPorts failed: Unknown operation type");
+        }
+    }
+
+    @Override
+    public void addNodeInfo(NodeInfo nodeInfo) throws Exception {
+        nodeInfoCache.addNodeInfo(nodeInfo);
+    }
+
+    @Override
+    public void addNodeInfoBulk(List<NodeInfo> nodeInfos) throws Exception {
+        nodeInfoCache.addNodeInfoBulk(nodeInfos);
+    }
+
+    @Override
+    public void updateNodeInfo(NodeInfo nodeInfo) throws Exception {
+        nodeInfoCache.updateNodeInfo(nodeInfo);
+    }
+
+    @Override
+    public void deleteNodeInfo(String nodeId) throws Exception {
+        nodeInfoCache.deleteNodeInfo(nodeId);
+    }
+
+    @Override
+    public NodeInfo getNodeInfo(String nodeId) throws Exception {
+        return nodeInfoCache.getNodeInfo(nodeId);
+    }
+
+    @Override
+    public List<NodeInfo> getNodeInfoByNodeIp(String nodeIp) throws Exception {
+        return nodeInfoCache.getNodeInfoByNodeIp(nodeIp);
     }
 }

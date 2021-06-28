@@ -1,17 +1,17 @@
 /*
-Copyright 2019 The Alcor Authors.
+MIT License
+Copyright(c) 2020 Futurewei Cloud
 
-Licensed under the Apache License, Version 2.0 (the "License");
-        you may not use this file except in compliance with the License.
-        You may obtain a copy of the License at
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
 
-        http://www.apache.org/licenses/LICENSE-2.0
-
-        Unless required by applicable law or agreed to in writing, software
-        distributed under the License is distributed on an "AS IS" BASIS,
-        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-        See the License for the specific language governing permissions and
-        limitations under the License.
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 package com.futurewei.alcor.dataplane.service.impl;
 
@@ -19,27 +19,27 @@ import com.futurewei.alcor.dataplane.entity.MulticastGoalState;
 import com.futurewei.alcor.dataplane.entity.UnicastGoalState;
 import com.futurewei.alcor.dataplane.exception.NeighborInfoNotFound;
 import com.futurewei.alcor.dataplane.exception.PortFixedIpNotFound;
-import com.futurewei.alcor.schema.Common;
-import com.futurewei.alcor.schema.Neighbor;
-import com.futurewei.alcor.schema.Port;
+import com.futurewei.alcor.schema.*;
+import com.futurewei.alcor.web.entity.dataplane.InternalPortEntity;
 import com.futurewei.alcor.web.entity.dataplane.NeighborEntry;
 import com.futurewei.alcor.web.entity.dataplane.NeighborInfo;
 import com.futurewei.alcor.web.entity.dataplane.v2.NetworkConfiguration;
+import com.futurewei.alcor.web.entity.port.PortEntity;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 
 @Service
 public class NeighborService extends ResourceService {
-    public Neighbor.NeighborState buildNeighborState(NeighborEntry neighborEntry, NeighborInfo neighborInfo, Common.OperationType operationType) {
+    public Neighbor.NeighborState buildNeighborState(NeighborEntry.NeighborType type, NeighborInfo neighborInfo, Common.OperationType operationType) {
         Neighbor.NeighborConfiguration.Builder neighborConfigBuilder = Neighbor.NeighborConfiguration.newBuilder();
         neighborConfigBuilder.setRevisionNumber(FORMAT_REVISION_NUMBER);
-        //neighborConfigBuilder.setId(); // TODO: We are going to need this per latest ACA change
+        neighborConfigBuilder.setId(neighborInfo.getPortId()); // TODO: We are going to need this per latest ACA change
         neighborConfigBuilder.setVpcId(neighborInfo.getVpcId());
         //neighborConfigBuilder.setName();
         neighborConfigBuilder.setMacAddress(neighborInfo.getPortMac());
         neighborConfigBuilder.setHostIpAddress(neighborInfo.getHostIp());
-        Neighbor.NeighborType neighborType = Neighbor.NeighborType.valueOf(neighborEntry.getNeighborType().getType());
+        Neighbor.NeighborType neighborType = Neighbor.NeighborType.valueOf(type.getType());
 
         //TODO:setNeighborHostDvrMac
         //neighborConfigBuilder.setNeighborHostDvrMac();
@@ -58,12 +58,50 @@ public class NeighborService extends ResourceService {
         return neighborStateBuilder.build();
     }
 
+    private List<NeighborInfo> buildNeighborInfosByPortEntities(NetworkConfiguration networkConfig) {
+        List<NeighborInfo> neighborInfos = new ArrayList<>();
+
+        List<InternalPortEntity> internalPortEntities = networkConfig.getPortEntities();
+        if (internalPortEntities != null) {
+            for (InternalPortEntity internalPortEntity: internalPortEntities) {
+                String bindingHostIP = internalPortEntity.getBindingHostIP();
+                if (bindingHostIP == null) {
+                    continue;
+                }
+
+                for (PortEntity.FixedIp fixedIp: internalPortEntity.getFixedIps()) {
+                    NeighborInfo neighborInfo = new NeighborInfo(bindingHostIP,
+                            internalPortEntity.getBindingHostId(),
+                            internalPortEntity.getId(),
+                            internalPortEntity.getMacAddress(),
+                            fixedIp.getIpAddress(),
+                            internalPortEntity.getVpcId(),
+                            fixedIp.getSubnetId());
+                    neighborInfos.add(neighborInfo);
+                }
+            }
+        }
+
+        return neighborInfos;
+    }
+
     public void buildNeighborStates(NetworkConfiguration networkConfig, String hostIp,
                                      UnicastGoalState unicastGoalState,
                                      MulticastGoalState multicastGoalState) throws Exception {
         Map<String, NeighborInfo> neighborInfos = networkConfig.getNeighborInfos();
         if (neighborInfos == null || neighborInfos.size() == 0) {
             return;
+        }
+
+        /**
+         * PortEntities themselves are not included in neighborInfos, build neighborInfos
+         * for them and add them to neighborInfo map before building neighborStates
+         */
+        List<NeighborInfo> neighborInfoList = buildNeighborInfosByPortEntities(networkConfig);
+        for (NeighborInfo neighborInfo: neighborInfoList) {
+            if (!neighborInfos.containsKey(neighborInfo.getPortIp())) {
+                neighborInfos.put(neighborInfo.getPortIp(), neighborInfo);
+            }
         }
 
         Map<String, List<NeighborEntry>> neighborTable = networkConfig.getNeighborTable();
@@ -95,15 +133,14 @@ public class NeighborService extends ResourceService {
                         throw new NeighborInfoNotFound();
                     }
 
-                    if (hostIp.equals(neighborInfo.getHostIp())) {
+                    if (hostIp.equals(neighborInfo.getHostIp()) && !neighborEntry.getNeighborType().equals(NeighborEntry.NeighborType.L3)) {
                         continue;
                     }
 
                     unicastGoalState.getGoalStateBuilder().addNeighborStates(buildNeighborState(
-                            neighborEntry, neighborInfo, networkConfig.getOpType()));
+                            neighborEntry.getNeighborType(), neighborInfo, networkConfig.getOpType()));
+                    multicastNeighborEntries.add(neighborEntry);
                 }
-
-                multicastNeighborEntries.addAll(neighborEntries);
             }
         }
 
@@ -123,7 +160,7 @@ public class NeighborService extends ResourceService {
 
             if (!neighborInfoSet.contains(neighborInfo1)) {
                 multicastGoalState.getGoalStateBuilder().addNeighborStates(buildNeighborState(
-                        neighborEntry, neighborInfo1, networkConfig.getOpType()));
+                        neighborEntry.getNeighborType(), neighborInfo1, networkConfig.getOpType()));
                 neighborInfoSet.add(neighborInfo1);
             }
         }

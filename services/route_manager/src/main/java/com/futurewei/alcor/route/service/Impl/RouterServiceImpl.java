@@ -1,21 +1,22 @@
 /*
-Copyright 2019 The Alcor Authors.
+MIT License
+Copyright(c) 2020 Futurewei Cloud
 
-Licensed under the Apache License, Version 2.0 (the "License");
-        you may not use this file except in compliance with the License.
-        You may obtain a copy of the License at
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
 
-        http://www.apache.org/licenses/LICENSE-2.0
-
-        Unless required by applicable law or agreed to in writing, software
-        distributed under the License is distributed on an "AS IS" BASIS,
-        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-        See the License for the specific language governing permissions and
-        limitations under the License.
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 package com.futurewei.alcor.route.service.Impl;
 
 import com.futurewei.alcor.common.db.CacheException;
+import com.futurewei.alcor.common.enumClass.OperationType;
 import com.futurewei.alcor.common.enumClass.RouteTableType;
 import com.futurewei.alcor.common.enumClass.VpcRouteTarget;
 import com.futurewei.alcor.common.exception.DatabasePersistenceException;
@@ -26,8 +27,8 @@ import com.futurewei.alcor.common.logging.LoggerFactory;
 import com.futurewei.alcor.route.entity.RouteConstant;
 import com.futurewei.alcor.route.exception.*;
 import com.futurewei.alcor.route.service.*;
-import com.futurewei.alcor.route.utils.RouteManagerUtil;
 import com.futurewei.alcor.web.entity.route.*;
+import com.futurewei.alcor.web.entity.subnet.HostRoute;
 import com.futurewei.alcor.web.entity.subnet.SubnetEntity;
 import com.futurewei.alcor.web.entity.subnet.SubnetWebJson;
 import com.futurewei.alcor.web.entity.subnet.SubnetsWebJson;
@@ -281,16 +282,41 @@ public class RouterServiceImpl implements RouterService {
     }
 
     @Override
-    public RouteTable updateSubnetRouteTable(String projectId, String subnetId, RouteTableWebJson resource) throws CacheException, DatabasePersistenceException, OwnMultipleSubnetRouteTablesException, CanNotFindVpc, CanNotFindSubnet, ResourceNotFoundException, ResourcePersistenceException, OwnMultipleVpcRouterException {
-        RouteTable routeTable = new RouteTable();
-        RouteTable inRoutetable = resource.getRoutetable();
+    public RouteTable updateSubnetRouteTable(String projectId, String subnetId, UpdateRoutingRuleResponse resource) throws CacheException, DatabasePersistenceException, OwnMultipleSubnetRouteTablesException, CanNotFindVpc, CanNotFindSubnet, ResourceNotFoundException, ResourcePersistenceException, OwnMultipleVpcRouterException {
+        InternalSubnetRoutingTable inRoutetable = resource.getInternalSubnetRoutingTable();
+        List<HostRoute> inHostRoutes = resource.getHostRouteToSubnet();
         // Get or create a router for a Subnet
-        routeTable = getSubnetRouteTable(projectId, subnetId);
+        RouteTable routeTable = getSubnetRouteTable(projectId, subnetId);
 
-        RouteManagerUtil.copyPropertiesIgnoreNull(inRoutetable, routeTable);
-        this.routeTableDatabaseService.addRouteTable(routeTable);
-
-        // TODO: notify Subnet Manager to update L3 neighbor for all ports in the same subnet
+        for (InternalRoutingRule inRule : inRoutetable.getRoutingRules()) {
+            if (OperationType.CREATE.equals(inRule.getOperationType())) {
+                RouteEntry newRoute = new RouteEntry(projectId, inRule.getId(), inRule.getName(), null,
+                        inRule.getDestination(), null, inRule.getPriority(), null, inRule.getNextHopIp());
+                routeTable.getRouteEntities().add(newRoute);
+            } else {
+                RouteEntry route = routeTable.getRouteEntities().stream().filter(e -> e.getId().equals(inRule.getId())).findFirst().orElse(null);
+                if (route != null) {
+                    if (OperationType.UPDATE.equals(inRule.getOperationType())) {
+                        RouteEntry uRoute = new RouteEntry(projectId, route.getId(), inRule.getName(), null,
+                                inRule.getDestination(), null, inRule.getPriority(), null, inRule.getNextHopIp());
+                        // delete old route rule
+                        for (RouteEntry routeEntry : routeTable.getRouteEntities()) {
+                            if (routeEntry.getId().equals(route.getId())) {
+                                routeTable.getRouteEntities().remove(routeEntry);
+                                break;
+                            }
+                        }
+                        routeTable.getRouteEntities().add(uRoute);
+                    } else if (OperationType.DELETE.equals(inRule.getOperationType())) {
+                        routeTable.getRouteEntities().remove(route);
+                    }
+                }
+            }
+        }
+        if (routeTable != null) {
+            this.routeTableDatabaseService.addRouteTable(routeTable);
+            // TODO: notify Subnet Manager to update L3 neighbor for all ports in the same subnet
+        }
 
         return routeTable;
     }
@@ -313,7 +339,7 @@ public class RouterServiceImpl implements RouterService {
     }
 
     @Override
-    public RouteTable createNeutronSubnetRouteTable(String projectId, String subnetId, RouteTableWebJson resource) throws DatabasePersistenceException {
+    public RouteTable createNeutronSubnetRouteTable(String projectId, String subnetId, RouteTableWebJson resource, List<RouteEntry> routes) throws DatabasePersistenceException {
 
         // configure a new route table
         RouteTable routeTable = new RouteTable();
@@ -325,16 +351,11 @@ public class RouterServiceImpl implements RouterService {
         routeTable.setRouteTableType(RouteTableType.NEUTRON_SUBNET.getRouteTableType());
         routeTable.setOwner(subnetId);
 
-        routeTable.setRouteEntities(new ArrayList<RouteEntry>());
+        routeTable.setRouteEntities(routes);
 
-
-        RouteTable inRoutetable = resource.getRoutetable();
-
-        RouteManagerUtil.copyPropertiesIgnoreNull(inRoutetable, routeTable);
         this.routeTableDatabaseService.addRouteTable(routeTable);
 
         return routeTable;
-
     }
 
 

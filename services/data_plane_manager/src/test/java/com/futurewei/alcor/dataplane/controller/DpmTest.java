@@ -1,24 +1,24 @@
 /*
-Copyright 2019 The Alcor Authors.
+MIT License
+Copyright(c) 2020 Futurewei Cloud
 
-Licensed under the Apache License, Version 2.0 (the "License");
-        you may not use this file except in compliance with the License.
-        You may obtain a copy of the License at
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
 
-        http://www.apache.org/licenses/LICENSE-2.0
-
-        Unless required by applicable law or agreed to in writing, software
-        distributed under the License is distributed on an "AS IS" BASIS,
-        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-        See the License for the specific language governing permissions and
-        limitations under the License.
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 package com.futurewei.alcor.dataplane.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.futurewei.alcor.dataplane.client.DataPlaneClient;
+import com.futurewei.alcor.dataplane.client.grpc.DataPlaneClientImpl;
 import com.futurewei.alcor.dataplane.config.TestConfig;
-import com.futurewei.alcor.dataplane.constants.DPMAutoUnitTestConstant;
 import com.futurewei.alcor.schema.Common.OperationType;
 import com.futurewei.alcor.schema.Common.ResourceType;
 import com.futurewei.alcor.web.entity.dataplane.*;
@@ -75,7 +75,7 @@ public class DpmTest {
     private PulsarClient pulsarClient;
 
     @MockBean
-    private DataPlaneClient dataPlaneClient;
+    private DataPlaneClientImpl grpcDataPlaneClient;
 
     private List<VpcEntity> buildVpcEntities() {
         VpcEntity vpcEntity = new VpcEntity();
@@ -135,6 +135,8 @@ public class DpmTest {
         internalPortEntity.setName(TestConfig.portName1);
         internalPortEntity.setMacAddress(TestConfig.mac1);
         internalPortEntity.setAdminStateUp(true);
+        internalPortEntity.setDeviceOwner(TestConfig.deviceOwner);
+        internalPortEntity.setDeviceId(TestConfig.deviceId);
         List<PortEntity.FixedIp> fixedIps = new ArrayList<>();
         fixedIps.add(new PortEntity.FixedIp(TestConfig.subnetId1, TestConfig.ip11));
         internalPortEntity.setFixedIps(fixedIps);
@@ -366,7 +368,29 @@ public class DpmTest {
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON))
                 .andExpect(status().isCreated())
                 .andDo(print());
+    }
 
+    private NetworkConfiguration buildNeighborConfiguration() {
+        NetworkConfiguration networkConfiguration = new NetworkConfiguration();
+        networkConfiguration.setRsType(ResourceType.NEIGHBOR);
+        networkConfiguration.setOpType(OperationType.CREATE);
 
+        networkConfiguration.setNeighborInfos(buildNeighborInfos());
+        networkConfiguration.setNeighborTable(buildNeighborTable());
+
+        return networkConfiguration;
+    }
+
+    @Test
+    public void createNeighborConfigurationTest() throws Exception {
+        NetworkConfiguration networkConfiguration = buildNeighborConfiguration();
+        ObjectMapper objectMapper = new ObjectMapper();
+        String body = objectMapper.writeValueAsString(networkConfiguration);
+
+        this.mockMvc.perform(MockMvcRequestBuilders.post(TestConfig.url)
+                .content(body)
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON))
+                .andExpect(status().isCreated())
+                .andDo(print());
     }
 }

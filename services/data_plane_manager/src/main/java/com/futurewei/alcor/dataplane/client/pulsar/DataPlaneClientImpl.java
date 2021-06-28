@@ -1,20 +1,22 @@
 /*
-Copyright 2019 The Alcor Authors.
+MIT License
+Copyright(c) 2020 Futurewei Cloud
 
-Licensed under the Apache License, Version 2.0 (the "License");
-        you may not use this file except in compliance with the License.
-        You may obtain a copy of the License at
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
 
-        http://www.apache.org/licenses/LICENSE-2.0
-
-        Unless required by applicable law or agreed to in writing, software
-        distributed under the License is distributed on an "AS IS" BASIS,
-        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-        See the License for the specific language governing permissions and
-        limitations under the License.
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 package com.futurewei.alcor.dataplane.client.pulsar;
 
+import com.futurewei.alcor.dataplane.cache.LocalCache;
+import com.futurewei.alcor.dataplane.cache.NodeTopicCache;
 import com.futurewei.alcor.dataplane.client.DataPlaneClient;
 import com.futurewei.alcor.dataplane.entity.MulticastGoalState;
 import com.futurewei.alcor.dataplane.entity.UnicastGoalState;
@@ -37,7 +39,7 @@ import java.util.List;
 import java.util.Map;
 
 //@Component
-@Service("pulsar")
+@Service("pulsarDataPlaneClient")
 public class DataPlaneClientImpl implements DataPlaneClient {
     private static final Logger LOG = LoggerFactory.getLogger(DataPlaneClientImpl.class);
 
@@ -45,32 +47,20 @@ public class DataPlaneClientImpl implements DataPlaneClient {
     private PulsarClient pulsarClient;
 
     @Autowired
-    private TopicManager topicManager;
+    NodeTopicCache nodeTopicCache;
 
-    private List<String> getGroupTopics(List<String> hostIps) throws Exception {
-        List<String> groupTopics = new ArrayList<>();
-
-        for (String hostIp: hostIps) {
-            String groupTopic = topicManager.getGroupTopicByHostIp(hostIp);
+    private Map<String, List<String>> getMulticastTopics(List<String> hostIps) throws Exception {
+        Map<String, List<String>> multicastTopics = new HashMap<>();
+        for (String hostIp : hostIps) {
+            String groupTopic = nodeTopicCache.getNodeTopicInfoByNodeIp(hostIp).getGroupTopic();
             if (StringUtils.isEmpty(groupTopic)) {
                 LOG.error("Can not find group topic by host ip:{}", hostIp);
                 throw new GroupTopicNotFound();
             }
 
-            groupTopics.add(groupTopic);
-        }
-
-        return groupTopics;
-    }
-
-    private Map<String, List<String>> getMulticastTopics(List<String> hostIps) throws Exception {
-        Map<String, List<String>> multicastTopics = new HashMap<>();
-
-        List<String> groupTopics = this.getGroupTopics(hostIps);
-        for (String groupTopic: groupTopics) {
-            String multicastTopic = topicManager.getMulticastTopicByGroupTopic(groupTopic);
+            String multicastTopic = nodeTopicCache.getNodeTopicInfoByNodeIp(hostIp).getMulticastTopic();
             if (StringUtils.isEmpty(multicastTopic)) {
-                LOG.error("Can not find multicast topic by group topic:{}", groupTopic);
+                LOG.error("Can not find multicast topic by host ip:{}", hostIp);
                 throw new MulticastTopicNotFound();
             }
 
@@ -118,18 +108,18 @@ public class DataPlaneClientImpl implements DataPlaneClient {
     }
 
     @Override
-    public List<String> createGoalStates(List<UnicastGoalState> unicastGoalStates) throws Exception {
+    public List<String> sendGoalStates(List<UnicastGoalState> unicastGoalStates) throws Exception {
         List<String> failedHosts = new ArrayList<>();
 
         for (UnicastGoalState unicastGoalState: unicastGoalStates) {
-            String nextTopic = topicManager.getGroupTopicByHostIp(unicastGoalState.getHostIp());
+            String nextTopic = nodeTopicCache.getNodeTopicInfoByNodeIp(unicastGoalState.getHostIp()).getGroupTopic();
             if (StringUtils.isEmpty(nextTopic)) {
                 LOG.error("Can not find next topic by host ip:{}", unicastGoalState.getHostIp());
                 throw new GroupTopicNotFound();
             }
 
             String topic = nextTopic;
-            String unicastTopic = topicManager.getUnicastTopic();
+            String unicastTopic = nodeTopicCache.getNodeTopicInfoByNodeIp(unicastGoalState.getHostIp()).getUnicastTopic();
             if (!StringUtils.isEmpty(unicastTopic)) {
                 unicastGoalState.setNextTopic(nextTopic);
                 topic = unicastTopic;
@@ -156,10 +146,10 @@ public class DataPlaneClientImpl implements DataPlaneClient {
     }
 
     @Override
-    public List<String> createGoalStates(List<UnicastGoalState> unicastGoalStates, MulticastGoalState multicastGoalState) throws Exception {
+    public List<String> sendGoalStates(List<UnicastGoalState> unicastGoalStates, MulticastGoalState multicastGoalState) throws Exception {
         List<String> failedHosts = new ArrayList<>();
 
-        failedHosts.addAll(createGoalStates(unicastGoalStates));
+        failedHosts.addAll(sendGoalStates(unicastGoalStates));
         failedHosts.addAll(createGoalState(multicastGoalState));
 
         return failedHosts;

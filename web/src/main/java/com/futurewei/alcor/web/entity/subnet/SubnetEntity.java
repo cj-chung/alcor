@@ -1,17 +1,17 @@
 /*
-Copyright 2019 The Alcor Authors.
+MIT License
+Copyright(c) 2020 Futurewei Cloud
 
-Licensed under the Apache License, Version 2.0 (the "License");
-        you may not use this file except in compliance with the License.
-        You may obtain a copy of the License at
+    Permission is hereby granted,
+    free of charge, to any person obtaining a copy of this software and associated documentation files(the "Software"), to deal in the Software without restriction,
+    including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and / or sell copies of the Software, and to permit persons
+    to whom the Software is furnished to do so, subject to the following conditions:
 
-        http://www.apache.org/licenses/LICENSE-2.0
-
-        Unless required by applicable law or agreed to in writing, software
-        distributed under the License is distributed on an "AS IS" BASIS,
-        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-        See the License for the specific language governing permissions and
-        limitations under the License.
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 package com.futurewei.alcor.web.entity.subnet;
@@ -19,10 +19,10 @@ package com.futurewei.alcor.web.entity.subnet;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.futurewei.alcor.common.entity.CustomerResource;
 import com.futurewei.alcor.web.entity.port.PortEntity;
-import com.futurewei.alcor.web.entity.route.RouteEntity;
 import lombok.Data;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
+
 import java.util.List;
 
 @Data
@@ -41,6 +41,10 @@ public class SubnetEntity extends CustomerResource {
     @JsonProperty("gateway_ip")
     private String gatewayIp = "";
 
+    // subnet_gateway_port_id
+    @JsonProperty("gatewayPortId")
+    private String gatewayPortId;
+
     @JsonProperty("gateway_port_detail")
     private GatewayPortDetail gatewayPortDetail;
 
@@ -58,9 +62,6 @@ public class SubnetEntity extends CustomerResource {
 
     @JsonProperty("secondary_dns")
     private String secondaryDns;
-
-    @JsonProperty("routes")
-    private List<RouteEntity> routeEntities;
 
     @JsonProperty("dns_list")
     private List<String> dnsList;
@@ -151,16 +152,9 @@ public class SubnetEntity extends CustomerResource {
         this.cidr = cidr;
     }
 
-    public SubnetEntity(String projectId, String vpcId, String id, String name, String cidr, List<RouteEntity> routeEntities) {
-        super(projectId, id, name, null);
-        this.vpcId = vpcId;
-        this.cidr = cidr;
-        this.routeEntities = routeEntities;
-    }
-
     public SubnetEntity(String projectId, String id, String name, String description, String vpcId,
                         String cidr, String availabilityZone, String gatewayIp, Boolean dhcpEnable, String primaryDns,
-                        String secondaryDns, List<RouteEntity> routeEntities, GatewayPortDetail gatewayPortDetail, List<String> dnsList,
+                        String secondaryDns, GatewayPortDetail gatewayPortDetail, List<String> dnsList,
                         Integer ipVersion, String ipV4RangeId, String ipV6RangeId, String ipv6AddressMode, String ipv6RaMode,
                         Integer revisionNumber, String segmentId, Boolean shared, String sortDir, String sortKey,
                         String subnetpoolId, boolean dnsPublishFixedIp, List<String> tags, String tagsAny,
@@ -175,7 +169,6 @@ public class SubnetEntity extends CustomerResource {
         this.dhcpEnable = dhcpEnable;
         this.primaryDns = primaryDns;
         this.secondaryDns = secondaryDns;
-        this.routeEntities = routeEntities;
         this.gatewayPortDetail = gatewayPortDetail;
         this.dnsList = dnsList;
         this.ipVersion = ipVersion;
@@ -208,7 +201,7 @@ public class SubnetEntity extends CustomerResource {
     public SubnetEntity(SubnetEntity subnetEntity) {
         this(subnetEntity.getProjectId(), subnetEntity.getId(), subnetEntity.getName(), subnetEntity.getDescription(), subnetEntity.getVpcId(),
                 subnetEntity.getCidr(), subnetEntity.getAvailabilityZone(), subnetEntity.getGatewayIp(), subnetEntity.getDhcpEnable(), subnetEntity.getPrimaryDns(),
-                subnetEntity.getSecondaryDns(), subnetEntity.getRouteEntities(), subnetEntity.getGatewayPortDetail(), subnetEntity.getDnsList(),
+                subnetEntity.getSecondaryDns(), subnetEntity.getGatewayPortDetail(), subnetEntity.getDnsList(),
                 subnetEntity.getIpVersion(), subnetEntity.getIpV4RangeId(), subnetEntity.getIpV6RangeId(), subnetEntity.getIpv6AddressMode(), subnetEntity.getIpv6RaMode(),
                 subnetEntity.getRevisionNumber(), subnetEntity.getSegmentId(), subnetEntity.getShared(), subnetEntity.getSortDir(), subnetEntity.getSortKey(),
                 subnetEntity.getSubnetpoolId(), subnetEntity.dnsPublishFixedIp, subnetEntity.getTags(), subnetEntity.getTagsAny(),
@@ -271,14 +264,6 @@ public class SubnetEntity extends CustomerResource {
 
     public void setSecondaryDns(String secondaryDns) {
         this.secondaryDns = secondaryDns;
-    }
-
-    public List<RouteEntity> getRouteEntities() {
-        return routeEntities;
-    }
-
-    public void setRouteEntities(List<RouteEntity> routeEntities) {
-        this.routeEntities = routeEntities;
     }
 
     public GatewayPortDetail getGatewayPortDetail() {
